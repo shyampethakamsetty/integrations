@@ -1,5 +1,7 @@
 # notion.py
 
+import os
+import dotenv
 import json
 import secrets
 from fastapi import Request, HTTPException
@@ -8,16 +10,26 @@ import httpx
 import asyncio
 import base64
 import requests
+from urllib.parse import quote
 from integrations.integration_item import IntegrationItem
 
 from redis_client import add_key_value_redis, get_value_redis, delete_key_redis
 
-CLIENT_ID = 'XXX'
-CLIENT_SECRET = 'XXX'
+# load environment variables
+dotenv.load_dotenv()
+
+CLIENT_ID = os.getenv('NOTION_CLIENT_ID')
+CLIENT_SECRET = os.getenv('NOTION_CLIENT_SECRET')
 encoded_client_id_secret = base64.b64encode(f'{CLIENT_ID}:{CLIENT_SECRET}'.encode()).decode()
 
-REDIRECT_URI = 'http://localhost:8000/integrations/notion/oauth2callback'
-authorization_url = f'https://api.notion.com/v1/oauth/authorize?client_id={CLIENT_ID}&response_type=code&owner=user&redirect_uri=http%3A%2F%2Flocalhost%3A8000%2Fintegrations%2Fnotion%2Foauth2callback'
+REDIRECT_URI = os.getenv('BACKEND_BASE_URL') + '/integrations/notion/oauth2callback'
+authorization_url = (
+    f'https://api.notion.com/v1/oauth/authorize'
+    f'?client_id={CLIENT_ID}'
+    f'&response_type=code'
+    f'&owner=user'
+    f'&redirect_uri={quote(REDIRECT_URI, safe="")}'
+)
 
 async def authorize_notion(user_id, org_id):
     state_data = {
@@ -35,7 +47,15 @@ async def oauth2callback_notion(request: Request):
         raise HTTPException(status_code=400, detail=request.query_params.get('error'))
     code = request.query_params.get('code')
     encoded_state = request.query_params.get('state')
-    state_data = json.loads(encoded_state)
+
+    if not code:
+        raise HTTPException(status_code=400, detail='Missing code in callback.')
+    if not encoded_state:
+        raise HTTPException(status_code=400, detail='Missing state in callback.')
+    try:
+        state_data = json.loads(encoded_state)
+    except Exception:
+        raise HTTPException(status_code=400, detail='Invalid state payload.')
 
     original_state = state_data.get('state')
     user_id = state_data.get('user_id')
@@ -104,32 +124,32 @@ def _recursive_dict_search(data, target_key):
     return None
 
 def create_integration_item_metadata_object(
-    response_json: str,
+    response_json: dict,
 ) -> IntegrationItem:
     """creates an integration metadata object from the response"""
-    name = _recursive_dict_search(response_json['properties'], 'content')
+    name = _recursive_dict_search(response_json.get('properties', {}), 'content')
     parent_type = (
         ''
-        if response_json['parent']['type'] is None
-        else response_json['parent']['type']
+        if response_json.get('parent', {}).get('type') is None
+        else response_json.get('parent', {}).get('type')
     )
-    if response_json['parent']['type'] == 'workspace':
+    if response_json.get('parent', {}).get('type') == 'workspace':
         parent_id = None
     else:
         parent_id = (
-            response_json['parent'][parent_type]
+            response_json.get('parent', {}).get(parent_type)
         )
 
     name = _recursive_dict_search(response_json, 'content') if name is None else name
     name = 'multi_select' if name is None else name
-    name = response_json['object'] + ' ' + name
+    name = response_json.get('object', 'unknown') + ' ' + str(name)
 
     integration_item_metadata = IntegrationItem(
-        id=response_json['id'],
-        type=response_json['object'],
+        id=response_json.get('id', ''),
+        type=response_json.get('object', 'unknown'),
         name=name,
-        creation_time=response_json['created_time'],
-        last_modified_time=response_json['last_edited_time'],
+        creation_time=response_json.get('created_time'),
+        last_modified_time=response_json.get('last_edited_time'),
         parent_id=parent_id,
     )
 
@@ -138,21 +158,50 @@ def create_integration_item_metadata_object(
 async def get_items_notion(credentials) -> list[IntegrationItem]:
     """Aggregates all metadata relevant for a notion integration"""
     credentials = json.loads(credentials)
+    access_token = credentials.get('access_token')
+    
+    if not access_token:
+        raise HTTPException(status_code=400, detail='No access token found in credentials.')
+    
     response = requests.post(
         'https://api.notion.com/v1/search',
         headers={
-            'Authorization': f'Bearer {credentials.get("access_token")}',
+            'Authorization': f'Bearer {access_token}',
             'Notion-Version': '2022-06-28',
         },
     )
 
     if response.status_code == 200:
-        results = response.json()['results']
+        results = response.json().get('results', [])
         list_of_integration_item_metadata = []
         for result in results:
             list_of_integration_item_metadata.append(
                 create_integration_item_metadata_object(result)
             )
-
-        print(list_of_integration_item_metadata)
-    return
+        
+        #Convert IntegrationItem objects to dictionaries for JSON serialization
+        serialized_items = []
+        for item in list_of_integration_item_metadata:
+            item_dict = {
+                'id': item.id,
+                'type': item.type,
+                'directory': item.directory,
+                'parent_path_or_name': item.parent_path_or_name,
+                'name': item.name,
+                'creation_time': item.creation_time,
+                'last_modified_time': item.last_modified_time,
+                'parent_id': item.parent_id,
+                'url': item.url,
+                'children': item.children,
+                'mime_type': item.mime_type,
+                'delta': item.delta,
+                'drive_id': item.drive_id,
+                'visibility': item.visibility,
+            }
+            serialized_items.append(item_dict)
+        print(f'Notion integration items: {serialized_items}')
+        return serialized_items
+    else:
+        error_detail = f'Failed to fetch items from Notion: {response.text}'
+        print(f'Notion API Error: {error_detail}')
+        raise HTTPException(status_code=response.status_code, detail=error_detail)

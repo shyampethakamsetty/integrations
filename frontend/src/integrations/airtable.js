@@ -7,6 +7,7 @@ import {
     CircularProgress
 } from '@mui/material';
 import axios from 'axios';
+import config from '../config';
 
 export const AirtableIntegration = ({ user, org, integrationParams, setIntegrationParams }) => {
     const [isConnected, setIsConnected] = useState(false);
@@ -19,7 +20,7 @@ export const AirtableIntegration = ({ user, org, integrationParams, setIntegrati
             const formData = new FormData();
             formData.append('user_id', user);
             formData.append('org_id', org);
-            const response = await axios.post(`http://localhost:8000/integrations/airtable/authorize`, formData);
+            const response = await axios.post(`${config.BASE_URL}${config.ENDPOINTS.AIRTABLE.AUTHORIZE}`, formData);
             const authURL = response?.data;
 
             const newWindow = window.open(authURL, 'Airtable Authorization', 'width=600, height=600');
@@ -43,7 +44,7 @@ export const AirtableIntegration = ({ user, org, integrationParams, setIntegrati
             const formData = new FormData();
             formData.append('user_id', user);
             formData.append('org_id', org);
-            const response = await axios.post(`http://localhost:8000/integrations/airtable/credentials`, formData);
+            const response = await axios.post(`${config.BASE_URL}${config.ENDPOINTS.AIRTABLE.CREDENTIALS}`, formData);
             const credentials = response.data; 
             if (credentials) {
                 setIsConnecting(false);
