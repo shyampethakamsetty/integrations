@@ -3,14 +3,19 @@ import {
     Box,
     Autocomplete,
     TextField,
+    Button,
 } from '@mui/material';
 import { AirtableIntegration } from './integrations/airtable';
 import { NotionIntegration } from './integrations/notion';
+import { SlackIntegration } from './integrations/slack';
+import { HubspotIntegration } from './integrations/hubspot';
 import { DataForm } from './data-form';
 
 const integrationMapping = {
     'Notion': NotionIntegration,
     'Airtable': AirtableIntegration,
+    'Slack': SlackIntegration,
+    'Hubspot': HubspotIntegration,
 };
 
 export const IntegrationForm = () => {
@@ -48,11 +53,18 @@ export const IntegrationForm = () => {
             <CurrIntegration user={user} org={org} integrationParams={integrationParams} setIntegrationParams={setIntegrationParams} />
         </Box>
         }
-        {integrationParams?.credentials && 
-        <Box sx={{mt: 2}}>
-            <DataForm integrationType={integrationParams?.type} credentials={integrationParams?.credentials} />
-        </Box>
-        }
+        {integrationParams?.credentials &&
+  <Box sx={{ mt: 2 }} display="flex" gap={2} alignItems="center">
+    <DataForm integrationType={integrationParams?.type} credentials={integrationParams?.credentials} />
+    <Button
+      variant="outlined"
+      color="warning"
+      onClick={() => setIntegrationParams({})}
+    >
+      Reset connection
+    </Button>
+  </Box>
+}
     </Box>
   );
 }
